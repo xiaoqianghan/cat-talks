@@ -1,0 +1,97 @@
+# Laziness evaluation
+
+```elixir
+Mix.install([
+  {:jason, "~> 1.4"},
+  {:aws, "~> 0.13.0"},
+  {:hackney, "~> 1.18"},
+  {:kino, "~> 0.12.2"}
+])
+```
+
+## Eager Evaluation
+
+### 计算发生的什么时候
+
+> Elixir的`|>`是一个语法糖，用于将值作为参数传递给后一个函数（作为后续函数的第一个参数）
+
+```elixir
+# `Enum`: A module which rovides a set of function to work with enumerables.
+0..9
+|> Enum.map(fn x -> x + 1 end)
+|> Enum.map(fn x -> x * 2 end)
+|> Enum.take(3)
+|> dbg()
+```
+
+### 计算发生与每一次函数调用的时刻
+
+```elixir
+0..9
+|> Stream.map(fn x -> x + 1 end)
+|> Stream.map(fn x -> x * 2 end)
+|> Enum.take(3)
+|> dbg()
+```
+
+### 计算是发生于我们实际取值的时刻
+
+## Laziness evaluation
+
+```elixir
+defmodule LazyEnum do
+  @moduledoc """
+  A demo module for show the implement of lazy eval which have two function,
+  `map`: accpet a  fun for apply to the enum
+  `tak`: take the limit result from the enum
+  """
+  defstruct [:enum, funs: []]
+
+  @doc """
+  传入的函数不执行，而是直接存储起来
+  """
+  def map(%LazyEnum{funs: funs} = lazy_enum, fun) when is_function(fun, 1) do
+    %{lazy_enum | funs: [fun | funs]}
+  end
+
+  # 初始状态，我们使用最开始的可遍历Enum和函数构造了LazyEnum
+  def map(enum, fun) when is_function(fun, 1) do
+    %LazyEnum{enum: enum, funs: [fun]}
+  end
+
+  @doc """
+  实际的执行
+  """
+  def take(%LazyEnum{enum: enum, funs: funs}, limit) do
+    # 将所有的函数组合
+    compose = fn input ->
+      IO.puts("execute the funs to input #{input}")
+
+      funs
+      |> Enum.reverse()
+      |> Enum.reduce(input, fn fun, acc ->
+        apply(fun, [acc])
+      end)
+    end
+
+    {acc, _} =
+      Enum.reduce_while(enum, {[], limit}, fn input, {acc, limit} ->
+        if limit > 0 do
+          {:cont, {[compose.(input) | acc], limit - 1}}
+        else
+          {:halt, {Enum.reverse(acc), limit}}
+        end
+      end)
+
+    acc
+  end
+end
+```
+
+```elixir
+1..1_000_000_000
+|> LazyEnum.map(fn x -> x + 1 end)
+|> LazyEnum.map(fn x -> x * 2 end)
+|> LazyEnum.take(5)
+|> dbg()
+```
